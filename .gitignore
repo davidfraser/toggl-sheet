@@ -1,0 +1,10 @@
+# imported symlink
+toggl.py
+
+# oauth files
+toggl-timesheets-*.json
+
+# Byte-compiled / optimized Python code
+__pycache__/
+*.py[cod]
+*$py.class

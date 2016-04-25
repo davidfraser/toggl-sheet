@@ -57,6 +57,8 @@ def format_time(t):
 def entry_to_sheet_row(entry):
     start_time = dateutil.parser.parse(entry.get('start')) if entry.get('start') else None
     end_time = dateutil.parser.parse(entry.get('stop')) if entry.get('stop') else None
+    start_time = localtz.fromutc(start_time.replace(tzinfo=None))
+    end_time = localtz.fromutc(end_time.replace(tzinfo=None))
     duration = end_time - start_time
     duration = duration.days * 86400 + duration.seconds
     if duration != entry.get('duration'):
@@ -97,7 +99,7 @@ def start_of_week(d):
 
 def sync_sheets(spreadsheet, year, client=None):
     today = datetime.today()
-    months = range(1, today.month+1 if today.year == year else 13)
+    months = reversed(range(1, today.month+1 if today.year == year else 13))
     summary_sheet = get_or_add_worksheet(spreadsheet, "Summary")
     setup_header(summary_sheet, SUMMARY_HEADERS)
     weeks = {}
@@ -138,7 +140,8 @@ def sync_sheets(spreadsheet, year, client=None):
         logging.info("Synchronizing data")
         for time_entry in month_entries:
             if time_entry.get('start'):
-                week = start_of_week(dateutil.parser.parse(time_entry.get('start')))
+                start_time = localtz.fromutc(dateutil.parser.parse(time_entry.get('start')).replace(tzinfo=None))
+                week = start_of_week(start_time)
                 weeks.setdefault(week, 0)
                 weeks[week] += time_entry.get('duration')
             toggl_id = time_entry.get('id')
@@ -146,7 +149,7 @@ def sync_sheets(spreadsheet, year, client=None):
             if toggl_id in toggl_id_map:
                 row, sheet_row = toggl_id_map[toggl_id]
                 cell_list = get_row(row)
-                for header, update_cell in zip(SHEET_HEADERS, cell_list):
+                for n, (header, update_cell) in enumerate(zip(SHEET_HEADERS, cell_list)):
                     cell_value = sheet_row[header]
                     if header == 'toggl_id':
                         cell_value = int(cell_value)
@@ -154,7 +157,8 @@ def sync_sheets(spreadsheet, year, client=None):
                         cell_value = "'" + cell_value
                     if cell_value != sheet_values[header]:
                         update_cell.value = sheet_values[header]
-                        logging.info("Mismatch on %s: %r %r", header, cell_value, sheet_values[header])
+                        logging.info("Mismatch on id %s at %s on %s: %r %r", toggl_id,
+                                     month_sheet.get_addr_int(row, n+1), header, cell_value, sheet_values[header])
                         update_cells.append(update_cell)
                 updated += 1
             else:
@@ -176,10 +180,12 @@ def sync_sheets(spreadsheet, year, client=None):
             month_sheet.update_cells(update_cells)
     week_cells = summary_sheet.range("%s:%s" % (summary_sheet.get_addr_int(2, 1),
                                                 summary_sheet.get_addr_int(len(weeks)+2, len(SUMMARY_HEADERS))))
+    logging.info("Updating summary cells")
     for n, (week, duration) in enumerate(sorted(weeks.items())):
         minutes = duration // 60
+        logging.info("Week starting %s had %d minutes", week.strftime("%Y-%m-%d"), minutes)
         week_cells[n * len(SUMMARY_HEADERS) + 0].value = week.strftime("%Y-%m-%d")
-        week_cells[n * len(SUMMARY_HEADERS) + 2].value = "%d:%02d" % (minutes//60, minutes%60)
+        week_cells[n * len(SUMMARY_HEADERS) + 2].value = "'%d:%02d" % (minutes//60, minutes%60)
     summary_sheet.update_cells(week_cells)
 
 

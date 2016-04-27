@@ -48,7 +48,7 @@ def get_or_add_worksheet(spreadsheet, sheet_name, rows=1000, cols=20):
         return spreadsheet.add_worksheet(sheet_name, rows, cols)
 
 SHEET_HEADERS = ['Date', 'toggl_id', 'Start', 'End', 'Project', 'Description', 'Duration']
-SUMMARY_HEADERS = ['Week Start', 'Days Worked', 'Total Hours']
+SUMMARY_HEADERS = ['Period', 'Days Worked', 'Total Hours']
 
 def format_time(t):
     s = t.strftime("%H:%M").lstrip('0')
@@ -100,9 +100,12 @@ def start_of_week(d):
 def sync_sheets(spreadsheet, year, client=None):
     today = datetime.today()
     months = reversed(range(1, today.month+1 if today.year == year else 13))
-    summary_sheet = get_or_add_worksheet(spreadsheet, "Summary")
-    setup_header(summary_sheet, SUMMARY_HEADERS)
-    weeks = {}
+    weekly_summary = get_or_add_worksheet(spreadsheet, "Weekly Summary")
+    setup_header(weekly_summary, SUMMARY_HEADERS)
+    monthly_summary = get_or_add_worksheet(spreadsheet, "Monthly Summary")
+    setup_header(monthly_summary, SUMMARY_HEADERS)
+    summary_weeks = {}
+    summary_months = {}
     for month in months:
         start_date = datetime(year=year, month=month, day=1)
         end_date = (start_date + timedelta(days=32)).replace(day=1)
@@ -142,8 +145,10 @@ def sync_sheets(spreadsheet, year, client=None):
             if time_entry.get('start'):
                 start_time = localtz.fromutc(dateutil.parser.parse(time_entry.get('start')).replace(tzinfo=None))
                 week = start_of_week(start_time)
-                weeks.setdefault(week, 0)
-                weeks[week] += time_entry.get('duration')
+                summary_weeks.setdefault(week, 0)
+                summary_weeks[week] += time_entry.get('duration')
+                summary_months.setdefault(month, 0)
+                summary_months[month] += time_entry.get('duration')
             toggl_id = time_entry.get('id')
             sheet_values = entry_to_sheet_row(time_entry)
             if toggl_id in toggl_id_map:
@@ -178,15 +183,25 @@ def sync_sheets(spreadsheet, year, client=None):
         if (update_cells):
             logging.info("Sending %d cells to sheet", len(update_cells))
             month_sheet.update_cells(update_cells)
-    week_cells = summary_sheet.range("%s:%s" % (summary_sheet.get_addr_int(2, 1),
-                                                summary_sheet.get_addr_int(len(weeks)+2, len(SUMMARY_HEADERS))))
+    week_cells = weekly_summary.range("%s:%s" % (weekly_summary.get_addr_int(2, 1),
+                                                weekly_summary.get_addr_int(len(summary_weeks)+2, len(SUMMARY_HEADERS))))
+    month_cells = monthly_summary.range("%s:%s" % (monthly_summary.get_addr_int(2, 1),
+                                                   monthly_summary.get_addr_int(len(summary_months) + 2,
+                                                                                len(SUMMARY_HEADERS))))
     logging.info("Updating summary cells")
-    for n, (week, duration) in enumerate(sorted(weeks.items())):
+    for n, (week, duration) in enumerate(sorted(summary_weeks.items())):
         minutes = duration // 60
         logging.info("Week starting %s had %d minutes", week.strftime("%Y-%m-%d"), minutes)
         week_cells[n * len(SUMMARY_HEADERS) + 0].value = week.strftime("%Y-%m-%d")
         week_cells[n * len(SUMMARY_HEADERS) + 2].value = "'%d:%02d" % (minutes//60, minutes%60)
-    summary_sheet.update_cells(week_cells)
+    weekly_summary.update_cells(week_cells)
+    for n, (month, duration) in enumerate(sorted(summary_months.items())):
+        minutes = duration // 60
+        month_start = datetime(year, month, 1)
+        logging.info("Month %s had %d minutes", month_start.strftime("%Y-%m (%b)"), minutes)
+        month_cells[n * len(SUMMARY_HEADERS) + 0].value = month_start.strftime("%Y-%m (%b)")
+        month_cells[n * len(SUMMARY_HEADERS) + 2].value = "'%d:%02d" % (minutes // 60, minutes % 60)
+    monthly_summary.update_cells(month_cells)
 
 
 def main():

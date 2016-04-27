@@ -114,7 +114,7 @@ def sync_sheets(spreadsheet, year, client=None):
         toggl_id_map = {}
         append_row = 2
         update_cells = []
-        added, updated = 0, 0
+        added, updated, unchanged = 0, 0, 0
         logging.info("Fetching toggl data for %s", month_sheet.title)
         month_entries = list(get_entries(start_date, end_date, client))
         logging.info("Fetching existing spreadsheet data for %s", month_sheet.title)
@@ -154,6 +154,7 @@ def sync_sheets(spreadsheet, year, client=None):
             if toggl_id in toggl_id_map:
                 row, sheet_row = toggl_id_map[toggl_id]
                 cell_list = get_row(row)
+                was_changed = False
                 for n, (header, update_cell) in enumerate(zip(SHEET_HEADERS, cell_list)):
                     cell_value = sheet_row[header]
                     if header == 'toggl_id':
@@ -165,7 +166,11 @@ def sync_sheets(spreadsheet, year, client=None):
                         logging.info("Mismatch on id %s at %s on %s: %r %r", toggl_id,
                                      month_sheet.get_addr_int(row, n+1), header, cell_value, sheet_values[header])
                         update_cells.append(update_cell)
-                updated += 1
+                        was_changed = True
+                if was_changed:
+                    updated += 1
+                else:
+                    unchanged += 1
             else:
                 cell_list = get_row(append_row)
                 for header, update_cell in zip(SHEET_HEADERS, cell_list):
@@ -174,13 +179,13 @@ def sync_sheets(spreadsheet, year, client=None):
                 update_cells.extend(cell_list)
                 added += 1
                 append_row += 1
-            if (added + updated) % 100 == 0:
-                logging.info("Added %d, updated %d rows", added, updated)
+            if (added + updated + unchanged) % 100 == 0:
+                logging.info("Added %d, updated %d, didn't change %d rows", added, updated, unchanged)
             if len(update_cells) > 250:
                 logging.info("Sending %d cells to sheet", len(update_cells))
                 month_sheet.update_cells(update_cells)
                 del update_cells[:]
-        if (update_cells):
+        if update_cells:
             logging.info("Sending %d cells to sheet", len(update_cells))
             month_sheet.update_cells(update_cells)
     week_cells = weekly_summary.range("%s:%s" % (weekly_summary.get_addr_int(2, 1),
